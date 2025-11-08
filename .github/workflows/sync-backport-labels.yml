@@ -40,13 +40,5 @@ jobs:
               gh label create "${label}"
             fi
           done <<< "${desired_labels}"
-
-          # Remove those that are no longer required
-          while IFS= read -r label; do
-            if ! echo "${desired_labels}" | grep --quiet "${label}"; then
-              echo "::notice::Deleting deprecated label - ${label}"
-              gh label delete "${label}" --yes
-            fi
-          done <<< "${existing_labels}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

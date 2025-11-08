@@ -4,39 +4,80 @@ on:
   workflow_call:
     inputs:
       label-to-check-for:
+        description: "The label to check for on the PR to trigger the backport - if a prefix, the suffix is assumed to be the target branch"
         required: true
         type: string
       target-branch:
-        required: true
+        description: "The target branch to backport to, if not implied as a suffix of the label-to-check-for input"
+        required: false
         type: string
 
 jobs:
-  backport:
+  get-target-branches:
     runs-on: ubuntu-latest
-
+    outputs:
+      target-branches: ${{ steps.derive-target-branches.outputs.target_branches }}
     steps:
-      - name: Check PR for backport label
-        id: check_pr_labels
-        uses: shioyang/check-pr-labels-on-push-action@v1.0.12
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          labels: ${{ inputs.label-to-check-for }}
+      - name: Check PR
+        id: check_pr
+        # https://github.com/8BitJonny/gh-get-current-pr/commit/4056877062a1f3b624d5d4c2bedefa9cf51435c9
+        uses: 8BitJonny/gh-get-current-pr@4056877062a1f3b624d5d4c2bedefa9cf51435c9
 
-      - name: See result
-        if: runner.debug == '1'
-        run: echo "${{ steps.check_pr_labels.outputs.result }}"
+      - name: Derive target branch
+        id: derive-target-branches
+        run: |
+          set -o errexit -o nounset -o pipefail ${RUNNER_DEBUG:+-x}
 
-      - name: Checkout repository
-        if: ${{ steps.check_pr_labels.outputs.result == 'true' }}
-        uses: actions/checkout@v5
+          source /dev/stdin <<< "$(curl --silent https://raw.githubusercontent.com/hazelcast/github-actions-common-scripts/main/logging.functions.sh)"
+
+          branches=()
+
+          # Labels are comma-separated
+          IFS=, read -ra labels <<< "${{ steps.check_pr.outputs.pr_labels }}"
+          for label in "${labels[@]}"; do
+            echodebug "Looking at ${label}"
+
+            if [[ "$label" == "${{ inputs.label-to-check-for }}" ]]; then
+              echodebug "Found label ${label}, targeting ${{ inputs.target-branch }}"
+              echo "target-branch=${{ inputs.target-branch }}" >> ${GITHUB_OUTPUT}
+              branches+=("${{ inputs.target-branch }}")
+            else
+              extracted_branch=$(echo $label | sed 's/${{ inputs.label-to-check-for }} //')
+
+              if [[ -n ${extracted_branch} ]]; then
+                echodebug "Extracted branch ${extracted_branch} from ${label}, evaluating if suitable target"
+
+                if gh api "repos/${GITHUB_REPOSITORY}/branches/${extracted_branch}" --silent &>/dev/null; then
+                  echodebug "Found label ${label}, targeting ${extracted_branch}"
+                  branches+=("${extracted_branch}")
+                else
+                  echodebug "No corresponding ${extracted_branch} branch exists, ignoring"
+                fi
+              fi
+            fi
+          done
+
+          echo "target_branches=$(printf '%s\n' "${branches[@]}" | jq --raw-input --slurp --compact-output 'split("\n") | map(select(length > 0))')" >> ${GITHUB_OUTPUT}
+        env:
+          GH_TOKEN: ${{ secrets.DEVOPSHAZELCAST_PAT_FOR_MONOREPO }}
+
+  backport:
+    needs: get-target-branches
+    if: ${{ needs.get-target-branches.outputs.target-branches != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(needs.get-target-branches.outputs.target-branches) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
         with:
           # ensure the backport target branch is checked out, too
           fetch-depth: 0
 
-      - if: ${{ steps.check_pr_labels.outputs.result == 'true' }}
-        uses: hazelcast/backport/.github/actions/backport@master
+      - uses: hazelcast/backport/.github/actions/backport@master
         with:
           GITHUB_TOKEN: ${{ secrets.DEVOPSHAZELCAST_PAT_FOR_MONOREPO }}
-          TARGET_BRANCH: ${{ inputs.target-branch }}
+          TARGET_BRANCH: ${{ matrix.branch }}
           REF_TO_BACKPORT: ${{ github.sha }}
           BACKPORT_OPTIONS: --omit-labels

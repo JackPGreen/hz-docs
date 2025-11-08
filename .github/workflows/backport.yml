@@ -22,21 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # TODO can we move this logic i nto the action itself?
         version-and-branch: ${{ fromJSON(needs.get-maintenance-versions.outputs.versions-and-branches) }}
     uses: ./.github/workflows/backport-workflow.yml
     with:
-      label-to-check-for: '["backport to all versions"]'
+      label-to-check-for: "backport to all versions"
       target-branch: ${{ matrix.version-and-branch.branch }}
     secrets: inherit
 
   backport-to-specified-branch:
-    needs: get-maintenance-versions
-    strategy:
-      fail-fast: false
-      matrix:
-        version-and-branch: ${{ fromJSON(needs.get-maintenance-versions.outputs.versions-and-branches) }}
     uses: ./.github/workflows/backport-workflow.yml
     with:
-      label-to-check-for: '["backport to ${{ matrix.version-and-branch.version }}"]'
-      target-branch: ${{ matrix.version-and-branch.branch }}
+      label-to-check-for: "backport to"
     secrets: inherit
