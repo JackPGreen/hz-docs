@@ -19,15 +19,10 @@ jobs:
 
   backport-to-all-branch:
     needs: get-maintenance-versions
-    strategy:
-      fail-fast: false
-      matrix:
-        # TODO can we move this logic i nto the action itself?
-        version-and-branch: ${{ fromJSON(needs.get-maintenance-versions.outputs.versions-and-branches) }}
     uses: ./.github/workflows/backport-workflow.yml
     with:
       label-to-check-for: "backport to all versions"
-      target-branch: ${{ matrix.version-and-branch.branch }}
+      target-branches: ${{ needs.get-maintenance-versions.outputs.versions-and-branches }}
     secrets: inherit
 
   backport-to-specified-branch:

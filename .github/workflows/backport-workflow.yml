@@ -7,16 +7,16 @@ on:
         description: "The label to check for on the PR to trigger the backport - if a prefix, the suffix is assumed to be the target branch"
         required: true
         type: string
-      target-branch:
-        description: "The target branch to backport to, if not implied as a suffix of the label-to-check-for input"
+      target-branches:
+        description: "JSON array of target branches to backport to, if not implied as a suffix of the label-to-check-for input"
         required: false
         type: string
 
 jobs:
-  get-target-branches:
+  derive-target-branches:
     runs-on: ubuntu-latest
     outputs:
-      target-branches: ${{ steps.derive-target-branches.outputs.target_branches }}
+      target-branches: ${{ steps.derive-target-branches.outputs.branches }}
     steps:
       - name: Check PR
         id: check_pr
@@ -38,9 +38,13 @@ jobs:
             echodebug "Looking at ${label}"
 
             if [[ "$label" == "${{ inputs.label-to-check-for }}" ]]; then
-              echodebug "Found label ${label}, targeting ${{ inputs.target-branch }}"
-              echo "target-branch=${{ inputs.target-branch }}" >> ${GITHUB_OUTPUT}
-              branches+=("${{ inputs.target-branch }}")
+              echodebug "Found label ${label}, targeting ${{ inputs.target-branches }}"
+              # TODO test! what on earth format this is in
+              json_input='${{ inputs.target-branches }}'
+
+              while IFS= read -r branch; do
+                branches+=("${branch}")
+              done < <(echo "${json_input}" | jq --raw-output '.[]')
             else
               extracted_branch=$(echo $label | sed 's/${{ inputs.label-to-check-for }} //')
 
@@ -57,17 +61,17 @@ jobs:
             fi
           done
 
-          echo "target_branches=$(printf '%s\n' "${branches[@]}" | jq --raw-input --slurp --compact-output 'split("\n") | map(select(length > 0))')" >> ${GITHUB_OUTPUT}
+          echo "branches=$(printf '%s\n' "${branches[@]}" | jq --raw-input --slurp --compact-output 'split("\n") | map(select(length > 0))')" >> ${GITHUB_OUTPUT}
         env:
           GH_TOKEN: ${{ secrets.DEVOPSHAZELCAST_PAT_FOR_MONOREPO }}
 
   backport:
-    needs: get-target-branches
-    if: ${{ needs.get-target-branches.outputs.target-branches != '[]' }}
+    needs: derive-target-branches
+    if: ${{ needs.derive-target-branches.outputs.branches != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        branch: ${{ fromJSON(needs.get-target-branches.outputs.target-branches) }}
+        branch: ${{ fromJSON(needs.derive-target-branches.outputs.branches) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

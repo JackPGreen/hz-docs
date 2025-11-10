@@ -8,5 +8,5 @@ jobs:
     uses: ./.github/workflows/backport-workflow.yml
     with:
       label-to-check-for: '["forwardport to snapshot"]'
-      target-branch: main
+      target-branches: '["main"]'
     secrets: inherit
